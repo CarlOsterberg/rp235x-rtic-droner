@@ -1,6 +1,6 @@
 [package]
 edition = "2024"
-name = "rp235x-project-template"
+name = "rp235x-rtic-droner"
 version = "0.1.0"
 license = "MIT OR Apache-2.0"
 
@@ -12,12 +12,16 @@ fugit = "0.3"
 defmt = "1"
 defmt-rtt = "1"
 panic-probe = { version = "1", features = ["print-defmt"] }
-
+heapless = "0.8"
 rp235x-hal = { version = "0.3", features = [
     "rt",
     "critical-section-impl",
     "binary-info",
 ] }
+rtic-sync = "1.4.0"
+libm = "0.2"
+
+rust-matrices = {git = "https://github.com/CarlOsterberg/rust-matrices", rev = "db7dd3a" }
 
 [dependencies.rtic]
 version = "2.2.0"
@@ -57,21 +61,7 @@ debug-assertions = false
 overflow-checks = false
 opt-level = 0
 
-# cargo test
-#[profile.test]
-#debug = 2
-#debug-assertions = true
-#opt-level = 2
-#overflow-checks = true
-
-# cargo test --release
-#[profile.bench]
-#debug = 2
-#debug-assertions = false
-#lto = 'fat'
-#opt-level = 3
-
 [[bin]]
-name = "rp235x-project-template"
+name = "rp235x-rtic-droner"
 test = false
 bench = false
