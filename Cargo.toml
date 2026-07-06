@@ -22,6 +22,7 @@ rtic-sync = "1.4.0"
 libm = "0.2"
 
 rust-matrices = {git = "https://github.com/CarlOsterberg/rust-matrices", rev = "db7dd3a" }
+controller-radio-interface = {git = "https://github.com/CarlOsterberg/controller-radio-interface", features = ["defmt"] }
 
 [dependencies.rtic]
 version = "2.2.0"

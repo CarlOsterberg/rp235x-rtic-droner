@@ -1,5 +1,7 @@
 
 use rp235x_hal::{self as hal, gpio, uart};
+use rp235x_hal::gpio::bank0::{Gpio2, Gpio3, Gpio4, Gpio5, Gpio7};
+use rp235x_hal::gpio::{FunctionSio, FunctionSpi, Pin, PullDown, SioOutput};
 
 pub type UartRx = uart::Reader<
     hal::pac::UART0,
@@ -25,10 +27,30 @@ pub type I2c1 = hal::i2c::I2C<
     ),
 >;
 
-pub type InterruptPin = gpio::Pin<
+pub type InterruptPinIMU = gpio::Pin<
     gpio::bank0::Gpio13,
     gpio::FunctionSio<gpio::SioInput>,
     gpio::PullUp,
+>;
+
+pub type Spi = hal::spi::Spi<
+    hal::spi::Enabled,
+    hal::pac::SPI0,
+    (
+        Pin<Gpio3, FunctionSpi, PullDown>,
+        Pin<Gpio4, FunctionSpi, PullDown>,
+        Pin<Gpio2, FunctionSpi, PullDown>,
+    ),
+    8
+>;
+
+pub type CePin = Pin<Gpio7, FunctionSio<SioOutput>, PullDown>;
+pub type CsnPin = Pin<Gpio5, FunctionSio<SioOutput>, PullDown>;
+
+pub type InterruptPinNRF = gpio::Pin<
+    gpio::bank0::Gpio6,
+    gpio::FunctionSio<gpio::SioInput>,
+    gpio::PullDown,
 >;
 
 pub type PwmTR =
