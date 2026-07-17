@@ -9,7 +9,6 @@ pub struct ComplementaryFilter {
     theta_hat: f32,
     sample_rate_hz: f32,
     alpha: f32,
-    is_stationary: bool,
 }
 
 impl ComplementaryFilter {
@@ -19,7 +18,6 @@ impl ComplementaryFilter {
             theta_hat: 0.0,
             sample_rate_hz,
             alpha,
-            is_stationary: false,
         }
     }
     // Iterate the filter one timestep using new data
@@ -28,8 +26,8 @@ impl ComplementaryFilter {
         // Calculate theta_hat and phi_hat according to,
         // theta_hat = arcsin(ax/g)
         // phi_hat = arctan(ay/az)
-        let theta_n_accel = asinf(values.ax / constants::GRAVITY);
-        let phi_n_accel = atanf(values.ay / values.az);
+        let theta_n_accel = asinf(values.get_ax() / constants::GRAVITY);
+        let phi_n_accel = atanf(values.get_ay() / values.get_az());
         // ---------------------- ACCEL -----------------------
 
         // ----------------------- GYRO -----------------------
@@ -48,7 +46,7 @@ impl ComplementaryFilter {
             ],
             [0.0, cos_phi_hat, -sin_phi_hat],
         ]);
-        let b = Matrix::from_array([[values.gx], [values.gy], [values.gz]]);
+        let b = Matrix::from_array([[values.get_gx()], [values.get_gy()], [values.get_gz()]]);
         let phi_and_theta_dot = a * b;
         let phi_dot = phi_and_theta_dot.get(0, 0);
         let theta_dot = phi_and_theta_dot.get(1, 0);
@@ -67,9 +65,6 @@ impl ComplementaryFilter {
         self.theta_hat = (1.0 - self.alpha) * theta_gyro + self.alpha * theta_n_accel;
         self.phi_hat = (1.0 - self.alpha) * phi_gyro + self.alpha * phi_n_accel;
         // --------------- COMPLEMENTARY FILTER ---------------
-
-        self.is_stationary =
-            values.is_stationary(constants::ACCEL_THRESHOLD, constants::GYRO_THRESHOLD);
     }
 
     // Get roll in radians
@@ -80,9 +75,5 @@ impl ComplementaryFilter {
     // Get pitch in radians
     pub fn get_pitch(&self) -> f32 {
         self.theta_hat
-    }
-
-    pub fn get_is_stationary(&self) -> bool {
-        self.is_stationary
     }
 }

@@ -1,13 +1,37 @@
-use libm::sqrtf;
+
 use crate::constants::{ACCEL_LSB, GRAVITY, GYRO_LSB};
 
+pub struct GyroValues {
+    gx: f32,
+    gy: f32,
+    gz: f32,
+}
+
+impl GyroValues {
+    pub fn new(gx: f32, gy: f32, gz: f32) -> Self {
+        Self { gx, gy, gz }
+    }
+
+    pub fn get_gx(&self) -> f32 {
+        self.gx
+    }
+
+    pub fn get_gy(&self) -> f32 {
+        self.gy
+    }
+
+    pub fn get_gz(&self) -> f32 {
+        self.gz
+    }
+}
+
 pub struct SensorValues {
-    pub ax: f32,
-    pub ay: f32,
-    pub az: f32,
-    pub gx: f32,
-    pub gy: f32,
-    pub gz: f32,
+    ax: f32,
+    ay: f32,
+    az: f32,
+    gx: f32,
+    gy: f32,
+    gz: f32,
 }
 
 impl SensorValues {
@@ -46,30 +70,47 @@ impl SensorValues {
 
         SensorValues {
             // Due to sensor orientation on breadboard,
-            // az = x
-            // ay = y
-            // -ax = z
+            // ax = x
+            // ay = -y
+            // az = z
             ax: ax_m_ps,
-            ay: ay_m_ps,
+            ay: -ay_m_ps,
             az: az_m_ps,
             // Due to sensor orientation on breadboard,
-            // gz = x
+            // gx = -x
             // gy = y
-            // -gx = z
-            gx: gx_rad_ps,
+            // gz = -z
+            gx: -gx_rad_ps,
             gy: gy_rad_ps,
-            gz: gz_rad_ps,
+            gz: -gz_rad_ps,
         }
     }
 
-    pub fn is_stationary(&self, accel_threshold: f32, gyro_threshold: f32) -> bool {
-        // Check if gyroscope readings are near zero
-        let gyro_mag = sqrtf(self.gx * self.gx + self.gy * self.gy + self.gz * self.gz);
+    pub fn get_gx(&self) -> f32 {
+        self.gx
+    }
 
-        // Check if accelerometer is close to 1g (gravity only)
-        let accel_mag = sqrtf(self.ax * self.ax + self.ay * self.ay + self.az * self.az);
-        let accel_deviation = (accel_mag - GRAVITY).abs();
+    pub fn get_gy(&self) -> f32 {
+        self.gy
+    }
 
-        gyro_mag < gyro_threshold && accel_deviation < accel_threshold
+    pub fn get_gz(&self) -> f32 {
+        self.gz
+    }
+
+    pub fn get_ax(&self) -> f32 {
+        self.ax
+    }
+
+    pub fn get_ay(&self) -> f32 {
+        self.ay
+    }
+
+    pub fn get_az(&self) -> f32 {
+        self.az
+    }
+
+    pub fn get_gyro_values(&self) -> GyroValues {
+        GyroValues::new(self.gx, self.gy, self.gz)
     }
 }

@@ -12,13 +12,24 @@ pub const SENSOR_I2C_ADDR: u8 = 0x68;
 pub const SENSOR_DATA_REG: u8 = 0x3B;
 pub const SENSOR_DATA_NUM_BYTES: usize = 14;
 
-// Thresholds for when IMU is stationary
-pub const GYRO_THRESHOLD: f32 = 0.3; // rad/s
-pub const ACCEL_THRESHOLD: f32 = 1.0; // m/s²
+// Average values for when stationary, in degrees (converted to radians where used,
+// since ComplementaryFilter::get_roll()/get_pitch() return radians).
+pub const ROLL_SETPOINT: f32 = 1.0;
+pub const PITCH_SETPOINT: f32 = 4.5;
+
+pub const MOTOR_MIN: u16 = 2000;
+pub const MOTOR_MAX: u16 = 4000;
+
+// Clamp for the angle PIDs' output (commanded rate, rad/s) to prevent integral windup.
+pub const ANGLE_PID_RATE_LIMIT: f32 = 3.0;
+// Clamp for the rate PIDs' output (PWM duty contribution per axis) to prevent integral windup.
+pub const RATE_PID_OUTPUT_LIMIT: f32 = 500.0;
+
+pub const CONTROLLER_TRIGGER_CONVERSION_RATIO: f32 = 2000.0 / 255.0;
 
 pub const PWM_TOP: u16 = 20000;
-pub const UART_READER_CAPACITY: usize = 32;
-pub const MSG_Q_CAPACITY: usize = 32;
+// pub const UART_READER_CAPACITY: usize = 32; // Not used
+// pub const MSG_Q_CAPACITY: usize = 32;
 
 // nRF24L01 max SPI clock is 10MHz, use 8MHz to be safe
 pub const SPI_BAUDRATE: u32 = 8_000_000;
