@@ -21,14 +21,14 @@ pub const PITCH_SETPOINT: f32 = 4.5;
 
 pub const MOTOR_MIN: u16 = 2000;
 pub const MOTOR_FEATHER: u16 = 2500;
-pub const MOTOR_MAX: u16 = 4000;
+pub const MOTOR_MAX: u16 = 3000;
 
 // Clamp for the angle PIDs' output (commanded rate, rad/s) to prevent integral windup.
 pub const ANGLE_PID_RATE_LIMIT: f32 = 3.0;
 // Clamp for the rate PIDs' output (PWM duty contribution per axis) to prevent integral windup.
 pub const RATE_PID_OUTPUT_LIMIT: f32 = 500.0;
 
-pub const CONTROLLER_TRIGGER_CONVERSION_RATIO: f32 = 2000.0 / 255.0;
+pub const CONTROLLER_TRIGGER_CONVERSION_RATIO: f32 = MOTOR_MAX as f32 / 255.0;
 
 pub const PWM_TOP: u16 = 20000;
 // pub const UART_READER_CAPACITY: usize = 32; // Not used

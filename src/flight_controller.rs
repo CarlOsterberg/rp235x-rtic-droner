@@ -1,15 +1,15 @@
-use core::cmp::PartialEq;
-use crate::constants::{MOTOR_MAX, MOTOR_MIN, MOTOR_FEATHER};
+use crate::command_generator::Command;
+use crate::constants::{MOTOR_FEATHER, MOTOR_MAX, MOTOR_MIN};
 use crate::motor::mix_and_clamp;
 use crate::pid::Pid;
 use crate::type_defs::{PwmBL, PwmBR, PwmFL, PwmFR, UartTx};
+use core::cmp::PartialEq;
 use core::fmt::Write;
 use cortex_m::prelude::_embedded_hal_PwmPin;
 use heapless::String;
-use crate::command_generator::Command;
 
 #[derive(PartialEq)]
-pub enum DroneState{
+pub enum DroneState {
     Standby,
     On,
     Feather,
@@ -110,27 +110,49 @@ impl FlightController {
         self.string.clear();
     }
 
-    pub fn iterate_state(&mut self, command: Command)
-    {
+    pub fn iterate_state(&mut self, command: Command) {
         match command {
             Command::Throttle(throttle) => {
                 if self.state == DroneState::On {
-                    self.throttle = throttle;
-                }
-            },
-            Command::Start=> {
-                if self.state == DroneState::Standby {
                     self.state = DroneState::On;
+                    self.throttle = throttle;
+                    defmt::info!("Throttle {}", throttle);
                 }
             }
-            Command::Stop=> {
+            Command::Start => {
+                if self.state == DroneState::Standby || self.state == DroneState::Feather {
+                    self.state = DroneState::On;
+                    defmt::info!("DroneState::On");
+                }
+            }
+            Command::Stop => {
                 self.state = DroneState::Standby;
                 self.throttle = MOTOR_MIN;
+                defmt::info!("DroneState::Standby");
             }
-            Command::Feather=> {
-                self.state = DroneState::Feather;
-                self.throttle = MOTOR_FEATHER;
+            Command::Feather => {
+                if self.state == DroneState::On || self.state == DroneState::Standby {
+                    defmt::info!("DroneState::Feather");
+                    self.state = DroneState::Feather;
+                    self.throttle = MOTOR_FEATHER;
+                }
             }
+        }
+    }
+
+    pub fn set_feather(&mut self) {
+        if self.state != DroneState::Standby && self.state != DroneState::Feather {
+            defmt::info!("DroneState::Feather TIMEOUT");
+            self.state = DroneState::Feather;
+            self.throttle = MOTOR_FEATHER;
+        }
+    }
+
+    pub fn set_standby(&mut self) {
+        if self.state != DroneState::Standby {
+            defmt::info!("DroneState::Standby TIMEOUT");
+            self.state = DroneState::Standby;
+            self.throttle = MOTOR_MIN;
         }
     }
 }

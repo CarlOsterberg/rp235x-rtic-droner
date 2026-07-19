@@ -249,14 +249,14 @@ mod app {
 
         let sleep_duration_ms = 10;
         let dt = 1.0 / (sleep_duration_ms as f32 / 1000.0);
-        let mut angle_pid_pitch = Pid::new(100.0, 0.0, 0.0, PITCH_SETPOINT.to_radians(), dt);
-        let mut angle_pid_roll = Pid::new(100.0, 0.0, 0.0, ROLL_SETPOINT.to_radians(), dt);
+        let mut angle_pid_pitch = Pid::new(10.0, 0.1, 0.0, PITCH_SETPOINT.to_radians(), dt);
+        let mut angle_pid_roll = Pid::new(10.0, 0.1, 0.0, ROLL_SETPOINT.to_radians(), dt);
         angle_pid_pitch.set_output_limits(-ANGLE_PID_RATE_LIMIT, ANGLE_PID_RATE_LIMIT);
         angle_pid_roll.set_output_limits(-ANGLE_PID_RATE_LIMIT, ANGLE_PID_RATE_LIMIT);
 
-        let mut rate_pid_pitch = Pid::new(100.0, 0.0, 0.0, 0.0, dt);
-        let mut rate_pid_roll = Pid::new(100.0, 0.0, 0.0, 0.0, dt);
-        let mut rate_pid_yaw = Pid::new(100.0, 0.0, 0.0, 0.0, dt);
+        let mut rate_pid_pitch = Pid::new(50.0, 0.0, 0.0, 0.0, dt);
+        let mut rate_pid_roll = Pid::new(50.0, 0.0, 0.0, 0.0, dt);
+        let mut rate_pid_yaw = Pid::new(50.0, 0.0, 0.0, 0.0, dt);
         rate_pid_pitch.set_output_limits(-RATE_PID_OUTPUT_LIMIT, RATE_PID_OUTPUT_LIMIT);
         rate_pid_roll.set_output_limits(-RATE_PID_OUTPUT_LIMIT, RATE_PID_OUTPUT_LIMIT);
         rate_pid_yaw.set_output_limits(-RATE_PID_OUTPUT_LIMIT, RATE_PID_OUTPUT_LIMIT);
@@ -419,6 +419,7 @@ mod app {
     priority = 4)]
     async fn flight_controller(mut ctx: flight_controller::Context) {
         let local = ctx.local;
+        let mut time_since_last_command = Mono::now();
 
         loop {
             Mono::delay(local.sleep_duration_ms.millis()).await;
@@ -431,18 +432,23 @@ mod app {
             let drr = ctx.shared.desired_roll_rate.lock(|drr| *drr);
             let dpr = ctx.shared.desired_pitch_rate.lock(|dpr| *dpr);
 
-            match local.command_receiver.try_recv()
-            {
+            match local.command_receiver.try_recv() {
                 Ok(command) => {
+                    time_since_last_command = Mono::now();
                     local.flight_controller.iterate_state(command);
                 }
                 Err(_) => {
+                    let elapsed_since_last_command = Mono::now() - time_since_last_command;
+                    if elapsed_since_last_command.to_secs() > 10 {
+                        local.flight_controller.set_standby();
+                    }
+                    else if elapsed_since_last_command.to_secs() > 1 {
+                        local.flight_controller.set_feather();
+                    }
                 }
             }
 
-            local
-                .flight_controller
-                .update(gx, gy, gz, drr, dpr);
+            local.flight_controller.update(gx, gy, gz, drr, dpr);
         }
     }
 
@@ -461,9 +467,8 @@ mod app {
                             if command.is_none() {
                                 break;
                             }
-                            defmt::info!("{}", command.unwrap());
-                            if ctx.local.command_sender.try_send(command.unwrap()).is_err()
-                            {
+                            // defmt::info!("{}", command.unwrap());
+                            if ctx.local.command_sender.try_send(command.unwrap()).is_err() {
                                 defmt::error!("Command Q full, dropping data");
                                 break;
                             }
