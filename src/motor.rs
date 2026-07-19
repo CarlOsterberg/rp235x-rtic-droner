@@ -29,12 +29,12 @@ impl MotorOutputs {
     }
 }
 
-pub fn mix(base_throttle: f32, roll_out: f32, pitch_out: f32, _yaw_out: f32) -> MotorOutputs {
+pub fn mix(base_throttle: f32, roll_out: f32, pitch_out: f32, yaw_out: f32) -> MotorOutputs {
     MotorOutputs {
-        fr: base_throttle + roll_out + pitch_out /*+ yaw_out*/,
-        bl: base_throttle - roll_out - pitch_out /*+ yaw_out*/,
-        fl: base_throttle - roll_out + pitch_out /*- yaw_out*/,
-        br: base_throttle + roll_out - pitch_out /*- yaw_out*/,
+        fr: base_throttle + roll_out + pitch_out + yaw_out,
+        bl: base_throttle - roll_out - pitch_out + yaw_out,
+        fl: base_throttle - roll_out + pitch_out - yaw_out,
+        br: base_throttle + roll_out - pitch_out - yaw_out,
     }
 }
 

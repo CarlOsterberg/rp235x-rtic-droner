@@ -1,20 +1,20 @@
 #![no_std]
 #![no_main]
 
+mod command_generator;
 mod complementary_filter;
 mod constants;
+mod flight_controller;
 mod motor;
 mod nrf24l01;
 mod pid;
 mod sensor_values;
 mod type_defs;
 
-use core::fmt::Write;
+use cortex_m::prelude::_embedded_hal_PwmPin;
 use defmt_rtt as _;
 use embedded_hal::{i2c::I2c, spi::MODE_0};
 use fugit::RateExtU32;
-use heapless::String;
-use panic_probe as _;
 use rp235x_hal::{
     self as hal, Clock,
     clocks::init_clocks_and_plls,
@@ -25,19 +25,27 @@ use rp235x_hal::{
     watchdog::Watchdog,
 };
 use rtic_monotonics::rp235x::prelude::*;
+use rtic_sync::channel::{Receiver, Sender};
 
+use crate::command_generator::{Command, CommandGenerator};
 use crate::complementary_filter::*;
 use crate::constants::*;
-use crate::motor::*;
+use crate::flight_controller::*;
 use crate::nrf24l01::*;
 use crate::pid::*;
 use crate::sensor_values::*;
 use crate::type_defs::*;
 use controller_radio_interface::*;
 
-use cortex_m::prelude::_embedded_hal_PwmPin;
-
 rp235x_timer_monotonic!(Mono);
+
+#[panic_handler]
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    defmt::error!("panic {}", defmt::Display2Format(info));
+
+    // Halt or reset the device
+    cortex_m::peripheral::SCB::sys_reset();
+}
 
 /// Tell the Boot ROM about our application
 #[unsafe(link_section = ".start_block")]
@@ -67,34 +75,30 @@ pub static PICOTOOL_ENTRIES: [rp235x_hal::binary_info::EntryAddr; 5] = [
 )]
 mod app {
     use super::*;
+    use rtic_sync::make_channel;
 
     #[shared]
     struct Shared {
-        throttle: u16,
-        complementary_filter: ComplementaryFilter,
-        controller_state: ControllerState,
         gyro_values: GyroValues,
+        desired_roll_rate: f32,
+        desired_pitch_rate: f32,
     }
 
     #[local]
     struct Local {
-        uart_tx: UartTx,
         i2c: I2c1,
         interrupt_imu: InterruptPinIMU,
-        string: String<256>,
         buffer: [u8; 14],
-        pwm_front_right: PwmFR,
-        pwm_bottom_right: PwmBR,
-        pwm_bottom_left: PwmBL,
-        pwm_front_left: PwmFL,
         nrf24l01: NRF24L01,
         interrupt_nrf: InterruptPinNRF,
+        sleep_duration_ms: u64,
+        flight_controller: FlightController,
         angle_pid_pitch: Pid,
         angle_pid_roll: Pid,
-        rate_pid_pitch: Pid,
-        rate_pid_roll: Pid,
-        rate_pid_yaw: Pid,
-        sleep_duration_ms: u64,
+        complementary_filter: ComplementaryFilter,
+        command_generator: CommandGenerator,
+        command_sender: Sender<'static, Command, MSG_Q_CAPACITY>,
+        command_receiver: Receiver<'static, Command, MSG_Q_CAPACITY>,
     }
 
     #[init]
@@ -257,8 +261,18 @@ mod app {
         rate_pid_roll.set_output_limits(-RATE_PID_OUTPUT_LIMIT, RATE_PID_OUTPUT_LIMIT);
         rate_pid_yaw.set_output_limits(-RATE_PID_OUTPUT_LIMIT, RATE_PID_OUTPUT_LIMIT);
 
+        let flight_controller = FlightController::new(
+            pwm_pin_27,
+            pwm_pin_21,
+            pwm_pin_11,
+            pwm_pin_14,
+            rate_pid_pitch,
+            rate_pid_roll,
+            rate_pid_yaw,
+            uart_tx,
+        );
+
         let buffer: [u8; SENSOR_DATA_NUM_BYTES] = [0u8; SENSOR_DATA_NUM_BYTES];
-        let string: String<256> = String::new();
 
         // -------------------------- NRF24L01 --------------------------
         let sck = pins.gpio2.into_function::<FunctionSpi>();
@@ -284,39 +298,37 @@ mod app {
         let interrupt_nrf = pins.gpio6.into_pull_down_input();
         interrupt_nrf.set_interrupt_enabled(hal::gpio::Interrupt::EdgeLow, true);
 
-        let throttle: u16 = MOTOR_MIN + 100;
-
-        let controller_state = ControllerState::new();
-
         let gyro_values = GyroValues::new(0.0f32, 0.0f32, 0.0f32);
+
+        let desired_roll_rate = 0.0f32;
+        let desired_pitch_rate = 0.0f32;
+
+        let command_generator = CommandGenerator::new();
+
+        let (s, r) = make_channel!(Command, MSG_Q_CAPACITY);
 
         flight_controller::spawn().ok();
 
         (
             Shared {
-                throttle,
-                complementary_filter,
-                controller_state,
                 gyro_values,
+                desired_roll_rate,
+                desired_pitch_rate,
             },
             Local {
-                uart_tx,
                 i2c,
                 interrupt_imu,
                 buffer,
-                string,
-                pwm_front_right: pwm_pin_27,
-                pwm_bottom_right: pwm_pin_21,
-                pwm_bottom_left: pwm_pin_11,
-                pwm_front_left: pwm_pin_14,
                 nrf24l01,
                 interrupt_nrf,
+                sleep_duration_ms,
+                flight_controller,
                 angle_pid_pitch,
                 angle_pid_roll,
-                rate_pid_pitch,
-                rate_pid_roll,
-                rate_pid_yaw,
-                sleep_duration_ms,
+                complementary_filter,
+                command_generator,
+                command_sender: s,
+                command_receiver: r,
             },
         )
     }
@@ -351,7 +363,21 @@ mod app {
         }
     }
 
-    #[task(local = [i2c, buffer], shared = [complementary_filter, gyro_values], priority = 2)]
+    #[task(local =
+    [
+        i2c,
+        buffer,
+        angle_pid_pitch,
+        angle_pid_roll,
+        complementary_filter
+    ],
+    shared = [
+        gyro_values,
+        desired_roll_rate,
+        desired_pitch_rate
+    ],
+    priority = 2
+    )]
     async fn imu(mut ctx: imu::Context) {
         let local = ctx.local;
         match local
@@ -360,12 +386,19 @@ mod app {
         {
             Ok(_) => {
                 let sensor_values = SensorValues::new(local.buffer);
-                let gyro_values = sensor_values.get_gyro_values();
-
                 ctx.shared
-                    .complementary_filter
-                    .lock(|cf| cf.timestep(sensor_values));
-                ctx.shared.gyro_values.lock(|gv| *gv = gyro_values);
+                    .gyro_values
+                    .lock(|gv| *gv = sensor_values.get_gyro_values());
+                local.complementary_filter.timestep(sensor_values);
+                let roll = local.complementary_filter.get_roll();
+                let pitch = local.complementary_filter.get_pitch();
+                ctx.shared
+                    .desired_roll_rate
+                    .lock(|drr| *drr = local.angle_pid_roll.update(roll));
+                ctx.shared
+                    .desired_pitch_rate
+                    .lock(|dpr| *dpr = local.angle_pid_pitch.update(pitch));
+                // defmt::info!("roll {}\tpitch {}", roll.to_degrees(), pitch.to_degrees());
             }
             Err(_) => {
                 defmt::error!("mpu6050 i2c read error");
@@ -374,86 +407,47 @@ mod app {
     }
 
     #[task(local = [
-        angle_pid_pitch,
-        angle_pid_roll,
-        rate_pid_pitch,
-        rate_pid_roll,
-        rate_pid_yaw,
-        pwm_front_right,
-        pwm_bottom_right,
-        pwm_bottom_left,
-        pwm_front_left,
-        uart_tx,
-        string,
         sleep_duration_ms,
+        flight_controller,
+        command_receiver,
     ],
-    shared = [throttle, complementary_filter, gyro_values],
+    shared = [
+        gyro_values,
+        desired_roll_rate,
+        desired_pitch_rate,
+    ],
     priority = 4)]
     async fn flight_controller(mut ctx: flight_controller::Context) {
         let local = ctx.local;
 
         loop {
             Mono::delay(local.sleep_duration_ms.millis()).await;
+
             let (gx, gy, gz) = ctx
                 .shared
                 .gyro_values
                 .lock(|gv| (gv.get_gx(), gv.get_gy(), gv.get_gz()));
-            let (roll, pitch) = ctx
-                .shared
-                .complementary_filter
-                .lock(|cf| (cf.get_roll(), cf.get_pitch()));
 
-            let desired_roll_rate = local.angle_pid_roll.update(roll);
-            let desired_pitch_rate = local.angle_pid_pitch.update(pitch);
+            let drr = ctx.shared.desired_roll_rate.lock(|drr| *drr);
+            let dpr = ctx.shared.desired_pitch_rate.lock(|dpr| *dpr);
 
-            local.rate_pid_roll.set_setpoint(desired_roll_rate);
-            local.rate_pid_pitch.set_setpoint(desired_pitch_rate);
-            local.rate_pid_yaw.set_setpoint(0.0);
+            match local.command_receiver.try_recv()
+            {
+                Ok(command) => {
+                    local.flight_controller.iterate_state(command);
+                }
+                Err(_) => {
+                }
+            }
 
-            let roll_out = local.rate_pid_roll.update(gx);
-            let pitch_out = local.rate_pid_pitch.update(gy);
-            let yaw_out = local.rate_pid_yaw.update(gz);
-
-            let throttle = ctx.shared.throttle.lock(|t| *t);
-
-            let motors = mix_and_clamp(
-                throttle as f32,
-                roll_out,
-                pitch_out,
-                yaw_out,
-                MOTOR_MIN as f32,
-                MOTOR_MAX as f32,
-            );
-
-            local.pwm_front_right.set_duty(motors.get_fr() as u16);
-            local.pwm_bottom_right.set_duty(motors.get_br() as u16);
-            local.pwm_bottom_left.set_duty(motors.get_bl() as u16);
-            local.pwm_front_left.set_duty(motors.get_fl() as u16);
-
-            ctx.shared.complementary_filter.lock(|cf| {
-                write!(
-                    local.string,
-                    "roll:{:.3}\tpitch:{:.3}\troll_out:{:.3}\tpitch_out:{:.3}\t\
-                    yaw_out:{:.3}\tfr:{:.3}\tbr:{:.3}\tbl:{:.3}\tfl:{:.3}\r\n",
-                    cf.get_roll().to_degrees(),
-                    cf.get_pitch().to_degrees(),
-                    roll_out,
-                    pitch_out,
-                    yaw_out,
-                    motors.get_fr(),
-                    motors.get_br(),
-                    motors.get_bl(),
-                    motors.get_fl()
-                )
-                .unwrap();
-            });
-            local.uart_tx.write_full_blocking(local.string.as_bytes());
-            local.string.clear();
+            local
+                .flight_controller
+                .update(gx, gy, gz, drr, dpr);
         }
     }
 
-    #[task(local = [nrf24l01], shared = [throttle, controller_state], priority = 3)]
-    async fn radio(mut ctx: radio::Context) {
+    #[task(local = [nrf24l01, command_generator, command_sender], priority = 3)]
+    async fn radio(ctx: radio::Context) {
         let nrf24l01 = ctx.local.nrf24l01;
         let status = nrf24l01.read_status();
         nrf24l01.clear_interrupts();
@@ -462,21 +456,18 @@ mod app {
                 let payload = nrf24l01.read_payload();
                 let result = ControllerState::deserialize(&payload);
                 match result {
-                    Ok(xbox_controller_state) => {
-                        defmt::info!("{}", xbox_controller_state);
-                        for field in xbox_controller_state.fields() {
-                            match field {
-                                ControllerField::RightTrigger(x) => {
-                                    let throttle = MOTOR_MIN
-                                        + (CONTROLLER_TRIGGER_CONVERSION_RATIO * x as f32) as u16;
-                                    ctx.shared.throttle.lock(|t| *t = throttle);
-                                }
-                                _ => {}
+                    Ok(input) => {
+                        for command in ctx.local.command_generator.generate(input) {
+                            if command.is_none() {
+                                break;
+                            }
+                            defmt::info!("{}", command.unwrap());
+                            if ctx.local.command_sender.try_send(command.unwrap()).is_err()
+                            {
+                                defmt::error!("Command Q full, dropping data");
+                                break;
                             }
                         }
-                        ctx.shared
-                            .controller_state
-                            .lock(|cs| *cs = xbox_controller_state);
                     }
                     Err(error) => {
                         defmt::error!("{:?}", error);

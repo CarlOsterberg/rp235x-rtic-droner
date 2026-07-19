@@ -6,6 +6,8 @@ pub const GRAVITY: f32 = 9.818f32; // m/s^2
 pub const ACCEL_LSB: f32 = 16_384.0; // 16384/g
 pub const GYRO_LSB: f32 = 131.0;
 
+pub const MSG_Q_CAPACITY: usize = 100;
+
 // I2C address of the MPU6050 sensor
 pub const SENSOR_I2C_ADDR: u8 = 0x68;
 
@@ -18,6 +20,7 @@ pub const ROLL_SETPOINT: f32 = 1.0;
 pub const PITCH_SETPOINT: f32 = 4.5;
 
 pub const MOTOR_MIN: u16 = 2000;
+pub const MOTOR_FEATHER: u16 = 2500;
 pub const MOTOR_MAX: u16 = 4000;
 
 // Clamp for the angle PIDs' output (commanded rate, rad/s) to prevent integral windup.
